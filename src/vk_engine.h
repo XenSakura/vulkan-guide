@@ -30,7 +30,7 @@ struct FrameData
 {
 	VkCommandPool _commandPool;
 	VkCommandBuffer _mainCommandBuffer;
-	VkSemaphore _swapchainSemaphore, _renderSemaphore;
+	VkSemaphore _swapchainSemaphore;
 	VkFence _renderFence;
 	DeletionQueue _deletionQueue;
 };
@@ -117,6 +117,9 @@ public:
 
 	std::vector<ComputeEffect> backgroundEffects;
 	int currentBackgroundEffect{ 0 };
+
+	//Taken out of frame data
+	std::vector<VkSemaphore> _renderSemaphores;
 
 private:
 	void init_vulkan();

@@ -68,10 +68,16 @@ void VulkanEngine::cleanup()
             vkDestroyCommandPool(_device, _frames[i]._commandPool, nullptr);
 
             vkDestroyFence(_device, _frames[i]._renderFence, nullptr);
-            vkDestroySemaphore(_device, _frames[i]._renderSemaphore, nullptr);
+            //moved down
+            //vkDestroySemaphore(_device, _frames[i]._renderSemaphore, nullptr);
             vkDestroySemaphore(_device, _frames[i]._swapchainSemaphore, nullptr);
 
             _frames[i]._deletionQueue.flush();
+        }
+
+        for (VkSemaphore& sem : _renderSemaphores)
+        {
+            vkDestroySemaphore(_device, sem, nullptr);
         }
 
         _mainDeletionQueue.flush();
@@ -93,18 +99,21 @@ void VulkanEngine::cleanup()
 
 void VulkanEngine::draw()
 {
-    // nothing yet
-
-
+   
     //wait until the gpu has finished rendering the last frame. 1 second timeout
     VK_CHECK(vkWaitForFences(_device, 1, &get_current_frame()._renderFence, true, 1000000000));
+    
+    //flush all objects that need to be destroyed
+    get_current_frame()._deletionQueue.flush();
 
     //request next image from swapchain
     uint32_t swapchainImageIndex;
     VK_CHECK(vkAcquireNextImageKHR(_device, _swapchain, 1000000000, get_current_frame()._swapchainSemaphore, nullptr, &swapchainImageIndex));
 
+    
     VK_CHECK(vkResetFences(_device, 1, &get_current_frame()._renderFence));
-    get_current_frame()._deletionQueue.flush();
+
+    
 
     VkCommandBuffer cmd = get_current_frame()._mainCommandBuffer;
 
@@ -149,7 +158,7 @@ void VulkanEngine::draw()
     VkCommandBufferSubmitInfo cmdInfo = vkinit::command_buffer_submit_info(cmd);
 
     VkSemaphoreSubmitInfo waitInfo = vkinit::semaphore_submit_info(VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT_KHR, get_current_frame()._swapchainSemaphore);
-    VkSemaphoreSubmitInfo signalInfo = vkinit::semaphore_submit_info(VK_PIPELINE_STAGE_2_ALL_GRAPHICS_BIT, get_current_frame()._renderSemaphore);
+    VkSemaphoreSubmitInfo signalInfo = vkinit::semaphore_submit_info(VK_PIPELINE_STAGE_2_ALL_GRAPHICS_BIT, _renderSemaphores[swapchainImageIndex]);
 
     VkSubmitInfo2 submit = vkinit::submit_info(&cmdInfo, &signalInfo, &waitInfo);
 
@@ -158,13 +167,11 @@ void VulkanEngine::draw()
     VK_CHECK(vkQueueSubmit2(_graphicsQueue, 1, &submit, get_current_frame()._renderFence));
 
     //now we need the frame to present the image we have drawn to the screen
-    VkPresentInfoKHR presentInfo = {};
-    presentInfo.sType = VK_STRUCTURE_TYPE_PRESENT_INFO_KHR;
-    presentInfo.pNext = nullptr;
+    VkPresentInfoKHR presentInfo = vkinit::present_info();
     presentInfo.pSwapchains = &_swapchain;
     presentInfo.swapchainCount = 1;
 
-    presentInfo.pWaitSemaphores = &get_current_frame()._renderSemaphore;
+    presentInfo.pWaitSemaphores = &_renderSemaphores[swapchainImageIndex];
     presentInfo.waitSemaphoreCount = 1;
 
     presentInfo.pImageIndices = &swapchainImageIndex;
@@ -365,6 +372,15 @@ void VulkanEngine::init_swapchain()
 {
     create_swapchain(_windowExtent.width, _windowExtent.height);
 
+    //moving the creation of render semaphores here with each image
+    VkSemaphoreCreateInfo semaphoreCreateInfo = vkinit::semaphore_create_info();
+    _renderSemaphores.resize(_swapchainImages.size());
+
+    for (size_t i = 0; i < _swapchainImages.size(); i++)
+    {
+        VK_CHECK(vkCreateSemaphore(_device, &semaphoreCreateInfo, nullptr, &_renderSemaphores[i]));
+    }
+
     VkExtent3D drawImageExtent = {
         _windowExtent.width,
         _windowExtent.height,
@@ -433,7 +449,8 @@ void VulkanEngine::init_sync_structures()
         VK_CHECK(vkCreateFence(_device, &fenceCreateInfo, nullptr, &_frames[i]._renderFence));
 
         VK_CHECK(vkCreateSemaphore(_device, &semaphoreCreateInfo, nullptr, &_frames[i]._swapchainSemaphore));
-        VK_CHECK(vkCreateSemaphore(_device, &semaphoreCreateInfo, nullptr, &_frames[i]._renderSemaphore));
+        //moved to creation of swapchain to ensure validation layer compatibility
+        //VK_CHECK(vkCreateSemaphore(_device, &semaphoreCreateInfo, nullptr, &_frames[i]._renderSemaphore));
     }
 }
 
