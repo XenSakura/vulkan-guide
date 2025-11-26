@@ -5,6 +5,7 @@
 
 #include <vk_types.h>
 #include <vk_descriptors.h>
+#include <vk_loader.h>
 
 struct DeletionQueue
 {
@@ -33,6 +34,7 @@ struct FrameData
 	VkSemaphore _swapchainSemaphore;
 	VkFence _renderFence;
 	DeletionQueue _deletionQueue;
+	DescriptorAllocator _frameDescriptors;
 };
 
 struct ComputePushConstants
@@ -105,14 +107,19 @@ public:
 	VmaAllocator _allocator;
 
 	AllocatedImage _drawImage;
+	AllocatedImage _depthImage;
+
 	VkExtent2D _drawExtent;
+	float _renderScale = 1.0f;
 
 	DescriptorAllocator globalDescriptorAllocator;
 
+	//being used for gradient compute-- should I get rid of this soon?
 	VkDescriptorSet _drawImageDescriptors;
 	VkDescriptorSetLayout _drawImageDescriptorLayout;
 
 	
+	//TODO: Get rid of
 	VkPipelineLayout _gradientPipelineLayout;
 
 	std::vector<ComputeEffect> backgroundEffects;
@@ -121,8 +128,37 @@ public:
 	//Taken out of frame data
 	std::vector<VkSemaphore> _renderSemaphores;
 
-	VkPipelineLayout _trianglePipelineLayout;
-	VkPipeline _trianglePipeline;
+
+	//immediate submit structures
+	VkFence _immFence;
+	VkCommandBuffer _immCommandBuffer;
+	VkCommandPool _immCommandPool;
+
+	//mesh pipeline
+	VkPipelineLayout _meshPipelineLayout;
+	VkPipeline _meshPipeline;
+
+	//std span is like an array that doesn't use copy constructor
+	GPUMeshBuffers uploadMesh(std::span<uint32_t> indices, std::span<Vertex> vertices);
+
+	std::vector<std::shared_ptr<MeshAsset>> testMeshes;
+
+	bool resize_requested;
+
+	GPUSceneData sceneData;
+
+	VkDescriptorSetLayout _gpuSceneDataDescriptorLayout;
+
+	AllocatedImage _whiteImage;
+	AllocatedImage _blackImage;
+	AllocatedImage _greyImage;
+	AllocatedImage _errorCheckerboardImage;
+
+	VkSampler _defaultSamplerLinear;
+	VkSampler _defaultSamplerNearest;
+
+	VkDescriptorSetLayout _singleImageDescriptorLayout;
+	
 private:
 	void init_vulkan();
 	void init_swapchain();
@@ -132,7 +168,14 @@ private:
 	void init_pipelines();
 	void init_background_pipeline();
 	void init_imgui();
-	void init_triangle_pipeline();
+	void init_mesh_pipeline();
+	void init_default_data();
+	void resize_swapchain();
+
+	AllocatedImage create_image(VkExtent3D size, VkFormat format, VkImageUsageFlags usage, bool mipmapped = false);
+	AllocatedImage create_image(void* data, VkExtent3D size, VkFormat format, VkImageUsageFlags usage, bool mipmapped = false);
+	void destroy_image(const AllocatedImage& img);
+
 	
 	void create_swapchain(uint32_t width, uint32_t height);
 	void destroy_swapchain();
@@ -140,4 +183,20 @@ private:
 	void draw_background(VkCommandBuffer cmd);
 	void draw_imgui(VkCommandBuffer cmd, VkImageView targetImageView);
 	void draw_geometry(VkCommandBuffer cmd);
+
+	//two types of buffers
+	// UBO -- only a small amount can be accessed in the shader-- read only memory
+	//fastest accessible GPU memory. Not good for mesh data, but good for constants
+	// SSBO storage buffer -- generic read write buffers with high size-- do not get preloaded like UBOs do
+
+	//without Vulkan 1.3  buffers will need to be bound through descriptor sets-- bind 1 buffer of a given type
+	//need to know the specific buffer dimensions for the types, and deal with lifetime of descriptor sets
+	//we can use 1,3 vulkan buffer device address-- allows us to send a pointer tothe gpu and access it in the shader.
+	//basically a C++ pointer to the gpu
+	AllocatedBuffer create_buffer(size_t allocSize, VkBufferUsageFlags usage, VmaMemoryUsage memoryUsage);
+	void destroy_buffer(const AllocatedBuffer& buffer);
+
+	
+
+	void immediate_submit(std::function<void(VkCommandBuffer cmd)>&& function);
 };
